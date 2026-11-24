@@ -44,7 +44,7 @@ export function createQueue(cfg: Config, runner: Runner = runCheck) {
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(new Error("timeout")), cfg.jobTimeoutMs);
       try {
-        const result = await runner(job.request, cfg, { signal: ac.signal, log, jobId: job.jobId });
+        const result = await runner(job.request, cfg, { signal: ac.signal, log });
         update(job, { status: "completed", result, error: undefined });
         break;
       } catch (err) {

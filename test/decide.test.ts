@@ -29,7 +29,7 @@ const tour = [
 ];
 const input = (over: Partial<DecideInput> = {}): DecideInput => ({
   media, streams: { hasVideo: true, hasAudio: true, hasSpeech: null, hasMusic: null },
-  reasons: [], signals, model: model(tour), duplicateOfJobs: [], ...over,
+  reasons: [], signals, model: model(tour), duplicateSubmissions: 0, ...over,
 });
 
 test("a good walkthrough with a short intro is approved", () => {

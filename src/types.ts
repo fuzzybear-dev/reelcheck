@@ -68,8 +68,11 @@ export interface ContentFlags {
   watermark: boolean;
   otherPeople: boolean;
   unsafe: boolean;
-  /** Earlier jobs that submitted the exact same file. */
-  duplicateOfJobs: string[];
+  /**
+   * How many earlier checks submitted the exact same file. A count, not job IDs:
+   * job IDs are the only access control on results, so they must not leak to other callers.
+   */
+  duplicateSubmissions: number;
 }
 
 export interface Audit {
@@ -143,7 +146,7 @@ export interface Segment {
 export interface ModelAnalysis {
   segments: Segment[];
   slideshow: { isSlideshow: boolean; confidence: number };
-  flags: Omit<ContentFlags, "duplicateOfJobs">;
+  flags: Omit<ContentFlags, "duplicateSubmissions">;
   suggestedCoverSec: number | null;
   hasSpeech: boolean | null;
   hasMusic: boolean | null;

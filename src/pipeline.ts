@@ -23,8 +23,6 @@ export interface RunOptions {
   /** For local testing: analyse a file on disk and skip URL/HEAD/download. */
   localFile?: string;
   log?: (msg: string) => void;
-  /** This job's id, recorded against the file hash for duplicate detection. */
-  jobId?: string;
 }
 
 /** Drop the query string, which on signed URLs carries credentials. */
@@ -62,7 +60,7 @@ export async function runCheck(req: CheckRequest, cfg: Config, opts: RunOptions 
       cached,
     },
   });
-  const base = { media: null, streams: null, signals: null, model: null, duplicateOfJobs: [] as string[] };
+  const base = { media: null, streams: null, signals: null, model: null, duplicateSubmissions: 0 };
 
   // ---- Stage 1: probe ----
   let probeTarget = opts.localFile ?? req.videoUrl;
@@ -101,17 +99,17 @@ export async function runCheck(req: CheckRequest, cfg: Config, opts: RunOptions 
       const dl = await downloadWithHash(probeTarget, file, cfg.maxFileSizeMb * 1_048_576, cfg.allowedVideoHosts, signal);
       log(`stage 2: downloaded ${(dl.bytes / 1_048_576).toFixed(1)} MB sha256=${dl.sha256.slice(0, 12)}…`);
       const cacheKey = `${dl.sha256}:${cfg.rulesVersion}:${cfg.geminiModel}`;
-      const duplicates = store.noteFile(dl.sha256, opts.jobId ?? "local");
+      const duplicates = store.noteFile(dl.sha256);
       const cached = store.getCached(cacheKey);
       if (cached) {
-        log(`cache hit: returning ${cached.decision} from an earlier check; same file seen in jobs ${duplicates.join(", ")}`);
+        log(`cache hit: returning ${cached.decision} from an earlier check; file submitted ${duplicates} time(s) before`);
         return {
           ...cached,
-          contentFlags: cached.contentFlags && { ...cached.contentFlags, duplicateOfJobs: duplicates },
+          contentFlags: cached.contentFlags && { ...cached.contentFlags, duplicateSubmissions: duplicates },
           audit: { ...cached.audit, cached: true, processingMs: Date.now() - started, inputTokens: 0, outputTokens: 0, costUsd: 0 },
         };
       }
-      stage1.duplicateOfJobs = duplicates;
+      stage1.duplicateSubmissions = duplicates;
       const result = await stages234(file);
       // Transient model failures must not stick to the file forever.
       if (!result.reasons.some((r) => r.code === "ANALYSIS_FAILED")) store.putCached(cacheKey, result);

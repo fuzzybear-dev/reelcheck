@@ -4,8 +4,9 @@ import type { CheckResult, Job } from "./types.ts";
 
 const jobs = new Map<string, Job>();
 const resultsByHash = new Map<string, CheckResult>();
-const jobsByHash = new Map<string, string[]>();
-const MAX_JOBS_PER_HASH = 20;
+const submissionsByHash = new Map<string, number>();
+/** Above this many tracked clients, expired rate-limit entries are swept. */
+const MAX_RATE_KEYS = 10_000;
 const hits = new Map<string, number[]>();
 
 export const store = {
@@ -15,15 +16,18 @@ export const store = {
   getCached: (key: string) => resultsByHash.get(key),
   putCached: (key: string, r: CheckResult) => void resultsByHash.set(key, r),
 
-  /** Record that a job submitted this file; return the earlier jobs that did (oldest first). */
-  noteFile(hash: string, jobId: string): string[] {
-    const earlier = (jobsByHash.get(hash) ?? []).filter((j) => j !== jobId);
-    jobsByHash.set(hash, [...earlier, jobId].slice(-MAX_JOBS_PER_HASH));
+  /** Record a submission of this file; return how many earlier submissions there were. */
+  noteFile(hash: string): number {
+    const earlier = submissionsByHash.get(hash) ?? 0;
+    submissionsByHash.set(hash, earlier + 1);
     return earlier;
   },
 
   /** Sliding-window rate limit. Returns false if the key is over its limit. */
   allow(key: string, limit: number, windowMs: number, now = Date.now()): boolean {
+    if (hits.size > MAX_RATE_KEYS) {
+      for (const [k, ts] of hits) if (!ts.length || now - ts[ts.length - 1] >= windowMs) hits.delete(k);
+    }
     const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
     if (recent.length >= limit) {
       hits.set(key, recent);
@@ -34,7 +38,9 @@ export const store = {
     return true;
   },
 
+  _rateKeys: () => hits.size,
+
   _reset() {
-    jobs.clear(); resultsByHash.clear(); jobsByHash.clear(); hits.clear();
+    jobs.clear(); resultsByHash.clear(); submissionsByHash.clear(); hits.clear();
   },
 };

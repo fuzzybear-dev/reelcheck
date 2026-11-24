@@ -39,10 +39,17 @@ export function parseRequest(body: unknown, cfg: Config): CheckRequest | string[
   return errors.length ? errors : { videoUrl, callbackUrl };
 }
 
-/** Client address for rate limiting. X-Forwarded-For is only trusted behind a known proxy. */
-function clientIp(req: IncomingMessage, cfg: Config): string {
+/**
+ * Client address for rate limiting. X-Forwarded-For is only read when TRUST_PROXY=1,
+ * and then only its right-most entry: that one is appended by our own proxy, while
+ * everything to its left is supplied by the client and can be forged.
+ */
+export function clientIp(req: Pick<IncomingMessage, "headers" | "socket">, cfg: Pick<Config, "trustProxy">): string {
   const fwd = req.headers["x-forwarded-for"];
-  if (cfg.trustProxy && typeof fwd === "string" && fwd) return fwd.split(",")[0].trim();
+  if (cfg.trustProxy && typeof fwd === "string") {
+    const last = fwd.split(",").map((s) => s.trim()).filter(Boolean).pop();
+    if (last) return last;
+  }
   return req.socket.remoteAddress ?? "unknown";
 }
 

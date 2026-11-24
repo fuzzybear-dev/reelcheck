@@ -91,10 +91,12 @@ All limits and thresholds are in `src/config.ts` and can be overridden by enviro
   or below 0.6 confidence. Balconies count.
 - **Failures and timeouts**: 120 s per attempt, 2 retries, then the job completes as `review` with
   `ANALYSIS_FAILED`. Model failures are never cached.
-- **Duplicates**: if the exact same file was submitted before, the earlier job IDs are listed in
-  `contentFlags.duplicateOfJobs` and the cached result is returned at no model cost.
+- **Duplicates**: if the exact same file was submitted before, `contentFlags.duplicateSubmissions`
+  says how many times, and the cached result is returned at no model cost. Earlier job IDs are never
+  returned, because a job ID is what grants access to a job's result and logs.
 - **Rate limit**: `RATE_LIMIT_PER_HOUR` checks per client IP (default 60). Behind a reverse proxy,
-  set `TRUST_PROXY=1` so the limit uses `X-Forwarded-For`.
+  set `TRUST_PROXY=1` so the limit uses the right-most `X-Forwarded-For` entry (the one your proxy adds).
+  Leave it off when clients connect directly, or they can spoof their address.
 
 ## Limitations
 

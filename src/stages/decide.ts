@@ -22,7 +22,7 @@ export interface DecideInput {
   reasons: Reason[];
   signals: LocalSignals | null;
   model: ModelAnalysis | null;
-  duplicateOfJobs: string[];
+  duplicateSubmissions: number;
 }
 
 export function summariseRooms(segments: Segment[]): Room[] {
@@ -87,9 +87,9 @@ export function decide(input: DecideInput, cfg: Config): Omit<CheckResult, "audi
   const isSlideshow = pSlide >= 0.5;
 
   const flags: ContentFlags | null = model
-    ? { ...model.flags, duplicateOfJobs: input.duplicateOfJobs }
-    : input.duplicateOfJobs.length
-      ? { textOverlay: false, contactInfo: false, watermark: false, otherPeople: false, unsafe: false, duplicateOfJobs: input.duplicateOfJobs }
+    ? { ...model.flags, duplicateSubmissions: input.duplicateSubmissions }
+    : input.duplicateSubmissions > 0
+      ? { textOverlay: false, contactInfo: false, watermark: false, otherPeople: false, unsafe: false, duplicateSubmissions: input.duplicateSubmissions }
       : null;
 
   // --- rules that need stage 2 / stage 3 output ---
