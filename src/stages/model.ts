@@ -127,6 +127,7 @@ export async function analyseWithModel(
   withAudio: boolean,
   cfg: Config,
   signal?: AbortSignal,
+  log: (msg: string) => void = () => {},
 ): Promise<ModelAnalysis> {
   if (!cfg.geminiApiKey) throw new Error("GEMINI_API_KEY is not set");
   const video = await readFile(proxyPath);
@@ -151,18 +152,7 @@ export async function analyseWithModel(
     generationConfig,
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.geminiModel)}:generateContent`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": cfg.geminiApiKey },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 500)}`);
-  const json = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
-    usageMetadata?: GeminiUsage;
-  };
+  const { json, model } = await callGemini(body, cfg, signal, fetch, log);
   const text = json.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
   if (!text) throw new Error(`Gemini returned no content (finishReason=${json.candidates?.[0]?.finishReason})`);
 
@@ -187,8 +177,68 @@ export async function analyseWithModel(
     inputTokens: cost.input,
     outputTokens: cost.output,
     costUsd: cost.usd,
-    model: cfg.geminiModel,
+    model,
   };
+}
+
+interface GeminiResponse {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
+  usageMetadata?: GeminiUsage;
+}
+
+class FatalGeminiError extends Error {}
+
+/** Status codes worth retrying: rate limit, overload, transient server errors. */
+const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
+
+/**
+ * POST generateContent with a per-attempt timeout and retries. Flash-Lite can
+ * return 503 "high demand" or stall without answering, so each attempt is
+ * capped and the last attempt can go to a fallback model.
+ */
+export async function callGemini(
+  body: unknown,
+  cfg: Config,
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+  log: (msg: string) => void = () => {},
+): Promise<{ json: GeminiResponse; model: string }> {
+  let lastError = "";
+  for (let attempt = 1; attempt <= cfg.geminiAttempts; attempt++) {
+    const t0 = Date.now();
+    const last = attempt === cfg.geminiAttempts;
+    const model = last && cfg.geminiFallbackModel ? cfg.geminiFallbackModel : cfg.geminiModel;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    const attemptSignal = AbortSignal.any([
+      AbortSignal.timeout(cfg.geminiAttemptTimeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+    try {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": cfg.geminiApiKey },
+        body: JSON.stringify(body),
+        signal: attemptSignal,
+      });
+      if (res.ok) {
+        const json = (await res.json()) as GeminiResponse;
+        log(`stage 3: attempt ${attempt}/${cfg.geminiAttempts} ${model} -> 200 in ${Date.now() - t0} ms`);
+        return { json, model };
+      }
+      lastError = `Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 300)}`;
+      // 400 bad request, 403 bad key etc. will not get better on retry.
+      if (!RETRYABLE.has(res.status)) throw new FatalGeminiError(lastError);
+    } catch (err) {
+      if (err instanceof FatalGeminiError || signal?.aborted) throw err;
+      const e = err as Error;
+      lastError = e.name === "TimeoutError" || e.name === "AbortError"
+        ? `Gemini ${model} timed out after ${cfg.geminiAttemptTimeoutMs} ms`
+        : `Gemini ${model}: ${e.message}`;
+    }
+    log(`stage 3: attempt ${attempt}/${cfg.geminiAttempts} failed after ${Date.now() - t0} ms: ${lastError.replace(/\s+/g, " ").slice(0, 200)}`);
+    if (!last) await new Promise((r) => setTimeout(r, cfg.geminiRetryBaseMs * 2 ** (attempt - 1)));
+  }
+  throw new Error(`${lastError} (after ${cfg.geminiAttempts} attempts)`);
 }
 
 function clamp01(n: unknown): number {

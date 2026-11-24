@@ -33,13 +33,17 @@ export function parseRequest(body: unknown, cfg: Config): CheckRequest | string[
     return typeof v === "string" ? v.trim() : "";
   };
   const videoUrl = str("videoUrl", 2048);
-  const listingId = str("listingId");
-  const agentId = str("agentId");
-  const market = str("market", 8).toUpperCase();
   const callbackUrl = typeof b.callbackUrl === "string" && b.callbackUrl ? b.callbackUrl : undefined;
   if (callbackUrl && !isAllowedUrl(callbackUrl, cfg.allowedCallbackHosts))
     errors.push("callbackUrl must be HTTPS on an approved callback host");
-  return errors.length ? errors : { videoUrl, listingId, agentId, market, callbackUrl };
+  return errors.length ? errors : { videoUrl, callbackUrl };
+}
+
+/** Client address for rate limiting. X-Forwarded-For is only trusted behind a known proxy. */
+function clientIp(req: IncomingMessage, cfg: Config): string {
+  const fwd = req.headers["x-forwarded-for"];
+  if (cfg.trustProxy && typeof fwd === "string" && fwd) return fwd.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 export function createApp(cfg: Config = config, queue = createQueue(cfg)) {
@@ -57,20 +61,21 @@ export function createApp(cfg: Config = config, queue = createQueue(cfg)) {
         }
         const parsed = parseRequest(body, cfg);
         if (Array.isArray(parsed)) return send(res, 400, { error: "Invalid request", details: parsed });
-        if (!store.allow(`agent:${parsed.agentId}`, cfg.rateLimitPerAgentPerHour, HOUR) ||
-            !store.allow(`listing:${parsed.listingId}`, cfg.rateLimitPerListingPerHour, HOUR)) {
+        if (!store.allow(`ip:${clientIp(req, cfg)}`, cfg.rateLimitPerClientPerHour, HOUR)) {
           res.setHeader("retry-after", "3600");
-          return send(res, 429, { error: "Too many checks for this agent or listing; try again later" });
+          return send(res, 429, { error: "Too many checks from this client; try again later" });
         }
         const job = queue.enqueue(parsed);
         res.setHeader("location", `/v1/video-checks/${job.jobId}`);
         return send(res, 202, { jobId: job.jobId, status: job.status });
       }
 
-      const m = url.pathname.match(/^\/v1\/video-checks\/([\w-]+)$/);
+      const m = url.pathname.match(/^\/v1\/video-checks\/([\w-]+)(\/logs)?$/);
       if (req.method === "GET" && m) {
         const job = store.getJob(m[1]);
-        return job ? send(res, 200, jobView(job)) : send(res, 404, { error: "Job not found" });
+        if (!job) return send(res, 404, { error: "Job not found" });
+        if (m[2]) return send(res, 200, { jobId: job.jobId, status: job.status, attempts: job.attempts, logs: job.logs });
+        return send(res, 200, jobView(job));
       }
 
       send(res, 404, { error: "Not found" });

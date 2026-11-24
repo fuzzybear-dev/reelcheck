@@ -68,8 +68,8 @@ export interface ContentFlags {
   watermark: boolean;
   otherPeople: boolean;
   unsafe: boolean;
-  /** Other listings that already used the exact same file. */
-  duplicateOfListings: string[];
+  /** Earlier jobs that submitted the exact same file. */
+  duplicateOfJobs: string[];
 }
 
 export interface Audit {
@@ -103,9 +103,6 @@ export interface CheckResult {
 
 export interface CheckRequest {
   videoUrl: string;
-  listingId: string;
-  agentId: string;
-  market: string;
   callbackUrl?: string;
 }
 
@@ -116,6 +113,8 @@ export interface Job {
   createdAt: string;
   updatedAt: string;
   attempts: number;
+  /** Log lines for this job, newest last. */
+  logs: string[];
   result?: CheckResult;
   error?: string;
 }
@@ -144,7 +143,7 @@ export interface Segment {
 export interface ModelAnalysis {
   segments: Segment[];
   slideshow: { isSlideshow: boolean; confidence: number };
-  flags: Omit<ContentFlags, "duplicateOfListings">;
+  flags: Omit<ContentFlags, "duplicateOfJobs">;
   suggestedCoverSec: number | null;
   hasSpeech: boolean | null;
   hasMusic: boolean | null;

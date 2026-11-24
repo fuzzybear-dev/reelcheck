@@ -4,7 +4,8 @@ import type { CheckResult, Job } from "./types.ts";
 
 const jobs = new Map<string, Job>();
 const resultsByHash = new Map<string, CheckResult>();
-const listingsByHash = new Map<string, Set<string>>();
+const jobsByHash = new Map<string, string[]>();
+const MAX_JOBS_PER_HASH = 20;
 const hits = new Map<string, number[]>();
 
 export const store = {
@@ -14,12 +15,11 @@ export const store = {
   getCached: (key: string) => resultsByHash.get(key),
   putCached: (key: string, r: CheckResult) => void resultsByHash.set(key, r),
 
-  /** Record that a listing used this file; return the other listings that did. */
-  noteListing(hash: string, listingId: string): string[] {
-    const set = listingsByHash.get(hash) ?? new Set<string>();
-    set.add(listingId);
-    listingsByHash.set(hash, set);
-    return [...set].filter((l) => l !== listingId);
+  /** Record that a job submitted this file; return the earlier jobs that did (oldest first). */
+  noteFile(hash: string, jobId: string): string[] {
+    const earlier = (jobsByHash.get(hash) ?? []).filter((j) => j !== jobId);
+    jobsByHash.set(hash, [...earlier, jobId].slice(-MAX_JOBS_PER_HASH));
+    return earlier;
   },
 
   /** Sliding-window rate limit. Returns false if the key is over its limit. */
@@ -35,6 +35,6 @@ export const store = {
   },
 
   _reset() {
-    jobs.clear(); resultsByHash.clear(); listingsByHash.clear(); hits.clear();
+    jobs.clear(); resultsByHash.clear(); jobsByHash.clear(); hits.clear();
   },
 };

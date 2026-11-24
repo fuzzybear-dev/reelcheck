@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import { isAllowedUrl, safeFetch } from "./fetch.ts";
-import { runCheck } from "./pipeline.ts";
+import { createJobLogger } from "./logger.ts";
+import { redactUrl, runCheck } from "./pipeline.ts";
 import { store } from "./store.ts";
 import type { CheckRequest, CheckResult, Job } from "./types.ts";
 
@@ -14,7 +15,7 @@ export function createQueue(cfg: Config, runner: Runner = runCheck) {
 
   function enqueue(request: CheckRequest): Job {
     const now = new Date().toISOString();
-    const job: Job = { jobId: randomUUID(), status: "queued", request, createdAt: now, updatedAt: now, attempts: 0 };
+    const job: Job = { jobId: randomUUID(), status: "queued", request, createdAt: now, updatedAt: now, attempts: 0, logs: [] };
     store.putJob(job);
     pending.push(job.jobId);
     pump();
@@ -34,21 +35,21 @@ export function createQueue(cfg: Config, runner: Runner = runCheck) {
 
   async function process(job: Job) {
     update(job, { status: "processing" });
+    const { log } = createJobLogger(job.jobId, cfg.logFile, job.logs);
+    log(`job start: url=${redactUrl(job.request.videoUrl)}`);
     let lastError = "";
     for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
       update(job, { attempts: attempt + 1 });
+      if (attempt > 0) log(`job retry ${attempt}/${cfg.maxRetries}`);
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(new Error("timeout")), cfg.jobTimeoutMs);
       try {
-        const result = await runner(job.request, cfg, {
-          signal: ac.signal,
-          log: (m) => console.log(`[${job.jobId}] ${m}`),
-        });
+        const result = await runner(job.request, cfg, { signal: ac.signal, log, jobId: job.jobId });
         update(job, { status: "completed", result, error: undefined });
         break;
       } catch (err) {
         lastError = ac.signal.aborted ? `Timed out after ${cfg.jobTimeoutMs} ms` : (err as Error).message;
-        console.error(`[${job.jobId}] attempt ${attempt + 1} failed: ${lastError}`);
+        log(`job attempt ${attempt + 1} failed: ${lastError}`);
       } finally {
         clearTimeout(timer);
       }
@@ -56,8 +57,10 @@ export function createQueue(cfg: Config, runner: Runner = runCheck) {
     if (job.status !== "completed") {
       // Out of retries: hand the video to a person rather than failing silently.
       update(job, { status: "completed", result: reviewFallback(cfg), error: lastError });
+      log("job out of retries: marked for review (ANALYSIS_FAILED)");
     }
-    await sendCallback(job, cfg);
+    log(`job done: ${job.result?.decision} in ${Date.parse(job.updatedAt) - Date.parse(job.createdAt)} ms`);
+    await sendCallback(job, cfg, log);
   }
 
   return { enqueue, get size() { return pending.length + active; } };
@@ -86,15 +89,15 @@ export function jobView(job: Job) {
   return {
     jobId: job.jobId,
     status: job.status,
-    listingId: job.request.listingId,
     ...(job.result ?? {}),
     ...(job.error ? { error: job.error } : {}),
   };
 }
 
-async function sendCallback(job: Job, cfg: Config) {
+async function sendCallback(job: Job, cfg: Config, log: (m: string) => void) {
   const url = job.request.callbackUrl;
   if (!url || !isAllowedUrl(url, cfg.allowedCallbackHosts)) return;
+  log(`callback: POST ${redactUrl(url)}`);
   for (let i = 0; i < 3; i++) {
     try {
       const { res } = await safeFetch(url, cfg.allowedCallbackHosts, {
@@ -109,5 +112,5 @@ async function sendCallback(job: Job, cfg: Config) {
     }
     await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
   }
-  console.error(`[${job.jobId}] callback to ${new URL(url).host} failed`);
+  log(`callback to ${new URL(url).host} failed after 3 tries`);
 }

@@ -29,14 +29,21 @@ The API is asynchronous because a check takes seconds to minutes.
 
 ```sh
 curl -X POST localhost:8080/v1/video-checks \
-  -d '{"videoUrl":"https://uploads.example.com/v.mp4","listingId":"L1","agentId":"A1","market":"SG","callbackUrl":"https://hooks.example.com/reelcheck"}'
+  -d '{"videoUrl":"https://uploads.example.com/v.mp4","callbackUrl":"https://hooks.example.com/reelcheck"}'
 # 202 {"jobId":"…","status":"queued"}
 
 curl localhost:8080/v1/video-checks/<jobId>
 # {"jobId":"…","status":"completed","decision":"approve","score":86,"reasons":[],"media":{…},"rooms":[…],…}
+
+curl localhost:8080/v1/video-checks/<jobId>/logs
+# {"jobId":"…","status":"completed","attempts":1,"logs":["2026-11-24T09:12:03.120Z [<jobId>] +842ms stage 1: 576x1024 portrait 9:16 …", …]}
 ```
 
-If `callbackUrl` is given (and its host is in `ALLOWED_CALLBACK_HOSTS`), the same body is POSTed there
+Each job logs every stage (measurements, Gemini attempts, tokens, cost, decision) to stdout, to
+`logs/reelcheck.log` (`LOG_FILE`), and to the `/logs` endpoint above. Query strings are stripped from
+logged URLs, since signed URLs carry credentials.
+
+Only `videoUrl` is required. If `callbackUrl` is given (and its host is in `ALLOWED_CALLBACK_HOSTS`), the same body is POSTed there
 when the job finishes. Reason codes: `INVALID_URL`, `FILE_TOO_LARGE`, `UNSUPPORTED_FORMAT`,
 `NO_VIDEO_STREAM`, `TOO_SHORT`, `TOO_LONG`, `LOW_RESOLUTION`, `LANDSCAPE`, `SLIDESHOW`,
 `TALKING_HEAD`, `TOO_FEW_ROOMS`, `LOW_QUALITY`, `CONTACT_INFO`, `WATERMARK`, `UNSAFE_CONTENT`,
@@ -68,6 +75,9 @@ All limits and thresholds are in `src/config.ts` and can be overridden by enviro
 - `ALLOWED_CALLBACK_HOSTS`: hosts webhooks may be sent to. Empty disables callbacks.
 - `GEMINI_MODEL`, `GEMINI_PRICE_*_PER_M`: model and prices used for the cost in `audit`.
   Prices change; check Google's pricing page.
+- `GEMINI_ATTEMPTS`, `GEMINI_ATTEMPT_TIMEOUT_MS`, `GEMINI_FALLBACK_MODEL`: each model call is capped
+  (default 35 s) and retried on 429/5xx/timeout (default 3 attempts). If a fallback model is set, the
+  last attempt uses it; `audit.model` records which model answered.
 - `GEMINI_SEND_AUDIO=1`: also send a mono audio track so `hasSpeech`/`hasMusic` are filled
   (they are `null` otherwise). Adds roughly 25 tokens per second.
 - `CONTENT_FLAGS_REVIEW`: which content flags send a video to review. Default `unsafe` only; the
@@ -81,8 +91,10 @@ All limits and thresholds are in `src/config.ts` and can be overridden by enviro
   or below 0.6 confidence. Balconies count.
 - **Failures and timeouts**: 120 s per attempt, 2 retries, then the job completes as `review` with
   `ANALYSIS_FAILED`. Model failures are never cached.
-- **Duplicates**: reuse of the exact same file across listings is reported in
-  `contentFlags.duplicateOfListings`.
+- **Duplicates**: if the exact same file was submitted before, the earlier job IDs are listed in
+  `contentFlags.duplicateOfJobs` and the cached result is returned at no model cost.
+- **Rate limit**: `RATE_LIMIT_PER_HOUR` checks per client IP (default 60). Behind a reverse proxy,
+  set `TRUST_PROXY=1` so the limit uses `X-Forwarded-For`.
 
 ## Limitations
 

@@ -15,12 +15,15 @@ const list = (name: string, fallback: string[]): string[] =>
 export const config = {
   rulesVersion: "2026-11-24",
   port: num("PORT", 8080),
+  /** Append job logs here as well as stdout. Set to "" to disable. */
+  logFile: env.LOG_FILE ?? "logs/reelcheck.log",
 
   // --- Stage 1: hard limits ---
   minDurationSec: num("MIN_DURATION_SEC", 10),
   maxDurationSec: num("MAX_DURATION_SEC", 180),
   maxFileSizeMb: num("MAX_FILE_SIZE_MB", 300),
-  minShortEdgePx: num("MIN_SHORT_EDGE_PX", 720),
+  /** 540 rather than 720: CDN copies are re-encoded (e.g. 576x1024), so 720 rejects most of them. */
+  minShortEdgePx: num("MIN_SHORT_EDGE_PX", 540),
   allowedContainers: ["mov", "mp4", "m4a", "3gp", "3g2", "mj2", "matroska", "webm"],
   allowedVideoCodecs: ["h264", "hevc", "vp9"],
   /** Hosts videos may be fetched from. Empty = reject everything (fail closed). */
@@ -32,8 +35,9 @@ export const config = {
   jobTimeoutMs: num("JOB_TIMEOUT_MS", 120_000),
   maxRetries: num("MAX_RETRIES", 2),
   concurrency: num("CONCURRENCY", 2),
-  rateLimitPerAgentPerHour: num("RATE_LIMIT_AGENT_PER_HOUR", 30),
-  rateLimitPerListingPerHour: num("RATE_LIMIT_LISTING_PER_HOUR", 5),
+  /** Checks per client IP per hour. Behind a proxy, set TRUST_PROXY=1 to use X-Forwarded-For. */
+  rateLimitPerClientPerHour: num("RATE_LIMIT_PER_HOUR", 60),
+  trustProxy: env.TRUST_PROXY === "1",
 
   // --- Stage 2: local signals ---
   analysisFps: 2,
@@ -43,6 +47,11 @@ export const config = {
   // --- Stage 3: model ---
   geminiApiKey: env.GEMINI_API_KEY ?? "",
   geminiModel: env.GEMINI_MODEL ?? "gemini-3.1-flash-lite",
+  /** Used for the last attempt if set, e.g. when the main model is overloaded. */
+  geminiFallbackModel: env.GEMINI_FALLBACK_MODEL ?? "",
+  geminiAttempts: num("GEMINI_ATTEMPTS", 3),
+  geminiAttemptTimeoutMs: num("GEMINI_ATTEMPT_TIMEOUT_MS", 35_000),
+  geminiRetryBaseMs: num("GEMINI_RETRY_BASE_MS", 1_000),
   /** Thinking off/minimal saves output tokens. Set to "" to omit thinkingConfig. */
   geminiThinkingLevel: env.GEMINI_THINKING_LEVEL ?? "minimal",
   /** USD per 1M tokens. Confirm against Google's pricing page. */

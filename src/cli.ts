@@ -10,7 +10,7 @@ if (!file) {
   process.exit(2);
 }
 const result = await runCheck(
-  { videoUrl: `file://${resolve(file)}`, listingId: "local", agentId: "local", market: "SG" },
+  { videoUrl: `file://${resolve(file)}` },
   config,
   { localFile: resolve(file), log: (m) => console.error(`· ${m}`) },
 );
