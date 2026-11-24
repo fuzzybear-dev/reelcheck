@@ -1,0 +1,15 @@
+{
+  "name": "reelcheck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automated quality check for property listing videos: orientation, rooms shown, slideshow and talking-head detection, with an approve/reject/review verdict",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=23.6" },
+  "keywords": ["video", "moderation", "ffmpeg", "gemini", "real-estate"],
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "check": "node --env-file-if-exists=.env src/cli.ts",
+    "test": "node --test \"test/**/*.test.ts\""
+  }
+}
