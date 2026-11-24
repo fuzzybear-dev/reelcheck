@@ -108,6 +108,11 @@ All limits and thresholds are in `src/config.ts` and can be overridden by enviro
   against the current API version; `audit` records actual token usage so cost can be measured.
 - Not yet implemented: Gemini Batch API mode, near-duplicate detection, metrics.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability and what to set up before exposing
+the service.
+
 ## License
 
 [MIT](LICENSE)

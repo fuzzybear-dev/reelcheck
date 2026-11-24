@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions in .github/workflows up to date.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  # No npm dependencies today; this covers any that get added.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
